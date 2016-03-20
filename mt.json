@@ -1,0 +1,5 @@
+{
+    "name": "tokenBucket",
+    "paths": ["."],
+    "dependencies": {}
+}

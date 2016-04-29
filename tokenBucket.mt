@@ -17,9 +17,15 @@ exports (makeTokenBucket)
 # under the License.
 
 def makeTokenBucket(maximumSize :Int, refillRate :Double) as DeepFrozen:
+    "Produce a token bucket.
+
+     The bucket regenerates `refillRate` tokens/second while running, up to
+     `maximumSize` tokens total."
     var currentSize :Int := maximumSize
     var resolvers := []
     var loopingCall := null
+
+    def secondsPerToken :Double := 1 / refillRate
 
     return object tokenBucket:
         to getBurstSize() :Int:
@@ -42,7 +48,7 @@ def makeTokenBucket(maximumSize :Int, refillRate :Double) as DeepFrozen:
         to start(timer) :Void:
             loopingCall := makeLoopingCall(timer,
                 fn {tokenBucket.replenish(1)})
-            loopingCall.start(refillRate)
+            loopingCall.start(secondsPerToken)
 
         to stop() :Void:
             loopingCall.stop()

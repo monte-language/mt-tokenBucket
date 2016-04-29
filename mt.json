@@ -1,6 +1,7 @@
 {
     "name": "tokenBucket",
     "paths": ["."],
+    "entrypoint": "tokenBucket",
     "dependencies": {
         "loopingCall": {
             "url": "https://github.com/monte-language/mt-loopingCall"

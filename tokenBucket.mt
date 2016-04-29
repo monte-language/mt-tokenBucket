@@ -1,3 +1,4 @@
+import "unittest" =~ [=> unittest]
 import "loopingCall" =~ [=> makeLoopingCall :DeepFrozen]
 exports (makeTokenBucket)
 
@@ -27,22 +28,27 @@ def makeTokenBucket(maximumSize :Int, refillRate :Double) as DeepFrozen:
     var resolvers := []
     var loopingCall := null
 
-    def replenish(count :(Int < 0)) :Void:
+    def replenish(count :(Int > 0)) :Void:
         "The ability to refill the token bucket."
 
         if (currentSize < maximumSize):
             currentSize += count
 
-        for r in resolvers:
-            r.resolve(null)
-        resolvers := []
+        for i => [r, count] in (resolvers):
+            if (currentSize >= count):
+                currentSize -= count
+                r.resolve(null)
+            else:
+                resolvers := resolvers.slice(i, resolvers.size()).diverge()
+                break
 
     return object tokenBucket:
         to getBurstSize() :Int:
             return maximumSize
 
-        to deduct(count :(Int < 0)) :Bool:
-            if (count < currentSize):
+        to deduct(count :(1..maximumSize)) :Bool:
+            # traceln(`deduct($count): $currentSize/$maximumSize`)
+            if (count <= currentSize):
                 currentSize -= count
                 return true
             return false
@@ -54,7 +60,57 @@ def makeTokenBucket(maximumSize :Int, refillRate :Double) as DeepFrozen:
         to stop() :Void:
             loopingCall.stop()
 
-        to ready():
+        to willDeduct(count :(1..maximumSize)) :Any:
             def [p, r] := Ref.promise()
-            resolvers with= (r)
+            resolvers with= ([r, count])
             return p
+
+
+var clockPromises := [].diverge()
+object clock:
+    to fromNow(duration :Double):
+        def [p, r] := Ref.promise()
+        clockPromises.push([r, duration])
+        return p
+
+    to advance(amount :Double):
+        def unready := [].diverge()
+        def ready := [].diverge()
+        for [r, duration] in (clockPromises):
+            def remaining := duration - amount
+            if (remaining <= 0.0):
+                ready.push(r)
+            else:
+                unready.push([r, remaining])
+        clockPromises := unready
+        return promiseAllFulfilled([for r in (ready) r<-resolve(null)])
+
+def testTokenBucket(assert):
+    # Three tokens max, one per second.
+    def tb := makeTokenBucket(3, 1.0)
+    tb.start(clock)
+    # Deduct one. Current count should be two.
+    assert.equal(tb.deduct(1), true)
+    # Deduct two. Current count should be zero.
+    assert.equal(tb.deduct(2), true)
+    # Deduct one. Should fail.
+    assert.equal(tb.deduct(1), false)
+    # Refill one token.
+    return when (clock.advance(1.0)) ->
+        # Deduct one. Current count should be zero.
+        assert.equal(tb.deduct(1), true)
+
+def testTokenBucketWillDeduct(assert):
+    # Three tokens max, one per second.
+    def tb := makeTokenBucket(3, 1.0)
+    tb.start(clock)
+    # Deduct one. Current count should be two.
+    assert.equal(tb.deduct(1), true)
+    # Request three.
+    def p := tb.willDeduct(3)
+    return promiseAllFulfilled([clock.advance(1.0), p])
+
+unittest([
+    testTokenBucket,
+    testTokenBucketWillDeduct,
+])

@@ -39,8 +39,9 @@ def makeTokenBucket(maximumSize :Int, refillRate :Double) as DeepFrozen:
                 currentSize -= count
                 r.resolve(null)
             else:
-                resolvers := resolvers.slice(i, resolvers.size()).diverge()
-                break
+                resolvers := resolvers.slice(i, resolvers.size())
+                return
+        resolvers := []
 
     return object tokenBucket:
         to getBurstSize() :Int:

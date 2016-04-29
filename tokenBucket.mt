@@ -21,33 +21,34 @@ def makeTokenBucket(maximumSize :Int, refillRate :Double) as DeepFrozen:
 
      The bucket regenerates `refillRate` tokens/second while running, up to
      `maximumSize` tokens total."
+    def secondsPerToken :Double := 1 / refillRate
+
     var currentSize :Int := maximumSize
     var resolvers := []
     var loopingCall := null
 
-    def secondsPerToken :Double := 1 / refillRate
+    def replenish(count :(Int < 0)) :Void:
+        "The ability to refill the token bucket."
+
+        if (currentSize < maximumSize):
+            currentSize += count
+
+        for r in resolvers:
+            r.resolve(null)
+        resolvers := []
 
     return object tokenBucket:
         to getBurstSize() :Int:
             return maximumSize
 
-        to deduct(count :Int) :Bool:
+        to deduct(count :(Int < 0)) :Bool:
             if (count < currentSize):
                 currentSize -= count
                 return true
             return false
 
-        to replenish(count :Int) :Void:
-            if (currentSize < maximumSize):
-                currentSize += count
-
-            for r in resolvers:
-                r.resolve(null)
-            resolvers := []
-
         to start(timer) :Void:
-            loopingCall := makeLoopingCall(timer,
-                fn {tokenBucket.replenish(1)})
+            loopingCall := makeLoopingCall(timer, fn {replenish(1)})
             loopingCall.start(secondsPerToken)
 
         to stop() :Void:

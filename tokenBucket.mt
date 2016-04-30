@@ -96,6 +96,11 @@ def makeTokenBucket(maximumSize :(Int > 0), refillRate :Double) as DeepFrozen:
             timer := null
 
         to willDeduct(count :(1..maximumSize)) :Any:
+            # Try the fast thing first. This'll trigger a reschedule if
+            # needed.
+            if (tokenBucket.deduct(count)):
+                return null
+
             def [p, r] := Ref.promise()
             resolvers with= ([r, count])
             return p

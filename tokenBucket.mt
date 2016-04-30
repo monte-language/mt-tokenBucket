@@ -1,5 +1,4 @@
 import "unittest" =~ [=> unittest]
-import "loopingCall" =~ [=> makeLoopingCall :DeepFrozen]
 exports (makeTokenBucket)
 
 # Copyright (C) 2014 Google Inc. All rights reserved.
@@ -27,12 +26,19 @@ def makeTokenBucket(maximumSize :Int, refillRate :Double) as DeepFrozen:
     var currentSize :Int := maximumSize
     var resolvers := []
     var loopingCall := null
+    var timer := null
+    var leftovers := 0.0
 
+    def considerScheduling
     def replenish(count :(Int > 0)) :Void:
         "The ability to refill the token bucket."
 
+        # Do the actual fill.
         if (currentSize < maximumSize):
             currentSize += count
+            # Restore the bucket invariant.
+            if (currentSize >= maximumSize):
+                currentSize := maximumSize
 
         for i => [r, count] in (resolvers):
             if (currentSize >= count):
@@ -42,6 +48,20 @@ def makeTokenBucket(maximumSize :Int, refillRate :Double) as DeepFrozen:
                 resolvers := resolvers.slice(i, resolvers.size())
                 return
         resolvers := []
+        considerScheduling()
+
+    bind considerScheduling() :Void:
+        if (timer != null && currentSize != maximumSize):
+            when (def p := timer.fromNow(secondsPerToken)) ->
+                def elapsed :(Double > 0.0) := p
+                var count :Int := elapsed // secondsPerToken
+                # Put a modicum of effort into compensating.
+                leftovers += elapsed - (count * secondsPerToken)
+                if (leftovers > secondsPerToken):
+                    leftovers -= secondsPerToken
+                    count += 1
+                traceln(`Replenishing $count after $elapsed ($leftovers left over)`)
+                replenish(count)
 
     return object tokenBucket:
         to getBurstSize() :Int:
@@ -51,15 +71,16 @@ def makeTokenBucket(maximumSize :Int, refillRate :Double) as DeepFrozen:
             # traceln(`deduct($count): $currentSize/$maximumSize`)
             if (count <= currentSize):
                 currentSize -= count
+                considerScheduling()
                 return true
             return false
 
-        to start(timer) :Void:
-            loopingCall := makeLoopingCall(timer, fn {replenish(1)})
-            loopingCall.start(secondsPerToken)
+        to start(t) :Void:
+            timer := t
+            considerScheduling()
 
         to stop() :Void:
-            loopingCall.stop()
+            timer := null
 
         to willDeduct(count :(1..maximumSize)) :Any:
             def [p, r] := Ref.promise()
@@ -71,20 +92,23 @@ var clockPromises := [].diverge()
 object clock:
     to fromNow(duration :Double):
         def [p, r] := Ref.promise()
-        clockPromises.push([r, duration])
+        # [resolver, time remaining, total time sitting in queue]
+        clockPromises.push([r, duration, 0.0])
         return p
 
     to advance(amount :Double):
         def unready := [].diverge()
         def ready := [].diverge()
-        for [r, duration] in (clockPromises):
-            def remaining := duration - amount
+        for [r, var remaining, var spent] in (clockPromises):
+            remaining -= amount
+            spent += amount
             if (remaining <= 0.0):
-                ready.push(r)
+                ready.push([r, spent])
             else:
-                unready.push([r, remaining])
+                unready.push([r, remaining, spent])
         clockPromises := unready
-        return promiseAllFulfilled([for r in (ready) r<-resolve(null)])
+        return promiseAllFulfilled([for [r, spent] in (ready)
+                                    r<-resolve(spent)])
 
 def testTokenBucket(assert):
     # Three tokens max, one per second.

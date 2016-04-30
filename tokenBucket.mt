@@ -16,7 +16,7 @@ exports (makeTokenBucket)
 # License for the specific language governing permissions and limitations
 # under the License.
 
-def makeTokenBucket(maximumSize :Int, refillRate :Double) as DeepFrozen:
+def makeTokenBucket(maximumSize :(Int > 0), refillRate :Double) as DeepFrozen:
     "Produce a token bucket.
 
      The bucket regenerates `refillRate` tokens/second while running, up to
@@ -40,14 +40,16 @@ def makeTokenBucket(maximumSize :Int, refillRate :Double) as DeepFrozen:
             if (currentSize >= maximumSize):
                 currentSize := maximumSize
 
+        var newResolvers := []
         for i => [r, count] in (resolvers):
             if (currentSize >= count):
+                # traceln(`Crediting $count from ($currentSize/$maximumSize)`)
                 currentSize -= count
                 r.resolve(null)
             else:
-                resolvers := resolvers.slice(i, resolvers.size())
-                return
-        resolvers := []
+                newResolvers := resolvers.slice(i, resolvers.size())
+                break
+        resolvers := newResolvers
         considerScheduling()
 
     bind considerScheduling() :Void:
@@ -60,12 +62,23 @@ def makeTokenBucket(maximumSize :Int, refillRate :Double) as DeepFrozen:
                 if (leftovers > secondsPerToken):
                     leftovers -= secondsPerToken
                     count += 1
-                traceln(`Replenishing $count after $elapsed ($leftovers left over)`)
+                # traceln(`Replenishing $count after $elapsed ($leftovers left over)`)
                 replenish(count)
 
     return object tokenBucket:
-        to getBurstSize() :Int:
+        to _printOn(out) :Void:
+            def s := `<token bucket $currentSize/$maximumSize ($refillRate t/s)>`
+            out.print(s)
+
+        to maximumSize() :(Int > 0):
             return maximumSize
+
+        to backlog() :(Int >= 0):
+            "The number of tokens already spoken for via `.willDeduct/1`."
+            var i :Int := 0
+            for [_, count] in resolvers:
+                i += count
+            return i
 
         to deduct(count :(1..maximumSize)) :Bool:
             # traceln(`deduct($count): $currentSize/$maximumSize`)
@@ -133,9 +146,47 @@ def testTokenBucketWillDeduct(assert):
     assert.equal(tb.deduct(1), true)
     # Request three.
     def p := tb.willDeduct(3)
-    return promiseAllFulfilled([clock.advance(1.0), p])
+    return when (clock.advance(1.0), p) ->
+        null
+
+def testTokenBucketWillDeductDry(assert):
+    # Three tokens max, one per second.
+    def tb := makeTokenBucket(3, 1.0)
+    tb.start(clock)
+    # Deduct three, to empty the bucket.
+    assert.equal(tb.deduct(3), true)
+    # Let's do a couple of .willDeduct() while the bucket is empty.
+    clock<-advance(1.0)
+    return when (tb.willDeduct(1)) ->
+        clock<-advance(2.0)
+        when (tb.willDeduct(2)) ->
+            clock<-advance(3.0)
+            tb.willDeduct(3)
+
+def testTokenBucketWillDeductBoneDry(assert):
+    # Three tokens max, one per second.
+    def tb := makeTokenBucket(3, 1.0)
+    tb.start(clock)
+    # Deduct three, to empty the bucket.
+    assert.equal(tb.deduct(3), true)
+    # Let's do some .willDeduct() while the bucket is empty. We force
+    # callbacks to be delayed by a turn by also delaying the clock
+    # advancement.
+    def x := tb.willDeduct(3)
+    def y := tb.willDeduct(3)
+    def z := tb.willDeduct(3)
+    # Refill the bucket thrice.
+    clock<-advance(3.0)
+    return when (x) ->
+        clock<-advance(3.0)
+        when (y) ->
+            clock<-advance(3.0)
+            when (z) ->
+                null
 
 unittest([
     testTokenBucket,
     testTokenBucketWillDeduct,
+    testTokenBucketWillDeductDry,
+    testTokenBucketWillDeductBoneDry,
 ])

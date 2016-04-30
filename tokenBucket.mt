@@ -43,7 +43,7 @@ def makeTokenBucket(maximumSize :(Int > 0), refillRate :Double) as DeepFrozen:
         var newResolvers := []
         for i => [r, count] in (resolvers):
             if (currentSize >= count):
-                # traceln(`Crediting $count from ($currentSize/$maximumSize)`)
+                traceln(`Crediting $count from ($currentSize/$maximumSize)`)
                 currentSize -= count
                 r.resolve(null)
             else:
@@ -62,7 +62,7 @@ def makeTokenBucket(maximumSize :(Int > 0), refillRate :Double) as DeepFrozen:
                 if (leftovers > secondsPerToken):
                     leftovers -= secondsPerToken
                     count += 1
-                # traceln(`Replenishing $count after $elapsed ($leftovers left over)`)
+                traceln(`Replenishing $count after $elapsed ($leftovers left over)`)
                 replenish(count)
 
     return object tokenBucket:
@@ -81,7 +81,7 @@ def makeTokenBucket(maximumSize :(Int > 0), refillRate :Double) as DeepFrozen:
             return i
 
         to deduct(count :(1..maximumSize)) :Bool:
-            # traceln(`deduct($count): $currentSize/$maximumSize`)
+            traceln(`deduct($count): $currentSize/$maximumSize`)
             if (count <= currentSize):
                 currentSize -= count
                 considerScheduling()

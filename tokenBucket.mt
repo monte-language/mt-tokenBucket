@@ -76,7 +76,7 @@ def makeTokenBucket(maximumSize :(Int > 0), refillRate :Double) as DeepFrozen:
         to backlog() :(Int >= 0):
             "The number of tokens already spoken for via `.willDeduct/1`."
             var i :Int := 0
-            for [_, count] in resolvers:
+            for [_, count] in (resolvers):
                 i += count
             return i
 
